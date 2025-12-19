@@ -75,7 +75,7 @@
                         正在連線數據中心...
                     </span>
                 </div>
-                <p class="text-slate-500 mt-1 italic">即時數據連動分析 (資料集總數：14,150 筆)</p>
+                <p class="text-slate-500 mt-1 italic">即時數據連動分析 (資料集總數：<span id="db-total-count">載入中...</span> 筆)</p>
             </div>
             <button onclick="resetFilters()" class="flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 px-6 py-2.5 rounded-xl hover:bg-slate-50 transition-all shadow-sm active:scale-95">
                 <i data-lucide="rotate-ccw" size="18"></i> 重設所有條件
@@ -289,7 +289,7 @@
         let charts = { district: null, category: null, groups: null };
         let allSampleData = []; 
         let currentOffset = 0;
-        let totalDBCount = 14150; 
+        let totalDBCount = 0; 
         const FETCH_LIMIT = 1000;
 
         function initCheckboxes() {
@@ -416,6 +416,12 @@
                 if (result && result.results) {
                     allSampleData = result.results;
                     currentOffset = FETCH_LIMIT;
+
+                    if (result.count !== undefined) {
+                        totalDBCount = result.count;
+                        document.getElementById('db-total-count').innerText = totalDBCount.toLocaleString();
+                    }
+
                     updateDashboardUI(allSampleData);
                     updateStatus('● 實時數據已同步', 'bg-emerald-100', 'text-emerald-700');
                 } else { throw new Error(); }
@@ -595,6 +601,7 @@
 </body>
 
 </html>
+
 
 
 
