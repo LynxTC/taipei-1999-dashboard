@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>臺北市 1999 派工資料互動儀表板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        .chart-container {
+            position: relative;
+            height: 320px;
+            width: 100%;
+        }
+        .loading-overlay {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+        .checkbox-card {
+            @apply flex items-center gap-2 p-2 rounded-lg border border-slate-100 hover:bg-slate-50 transition-all cursor-pointer select-none;
+        }
+        .checkbox-card input[type="checkbox"] {
+            @apply w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500;
+        }
+        .checkbox-card.active {
+            @apply bg-blue-50 border-blue-200 text-blue-700;
+        }
+        .tab-active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .map-wrapper {
+            position: relative;
+            padding-bottom: 75%; /* 4:3 Aspect Ratio */
+            height: 0;
+            overflow: hidden;
+            border-radius: 12px;
+            background-color: #e2e8f0;
+        }
+        .map-wrapper iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+        .data-row {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .data-row:hover {
+            background-color: #eff6ff !important;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div id="app" class="max-w-7xl mx-auto">
+        <!-- 標題區域 -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-3">
+                    <h1 class="text-3xl font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="map" class="text-blue-600"></i>
+                        臺北市 1999 派工儀表板
+                    </h1>
+                    <span id="data-status" class="px-3 py-1 rounded-full text-xs font-bold bg-slate-200 text-slate-600 transition-all">
+                        正在連線數據中心...
+                    </span>
+                </div>
+                <p class="text-slate-500 mt-1 italic">即時數據連動分析 (資料集總數：14,150 筆)</p>
+            </div>
+            <button onclick="resetFilters()" class="flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 px-6 py-2.5 rounded-xl hover:bg-slate-50 transition-all shadow-sm active:scale-95">
+                <i data-lucide="rotate-ccw" size="18"></i> 重設所有條件
+            </button>
+        </header>
+
+        <!-- 統計卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="layers"></i></div>
+                    <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Filter Stats</span>
+                </div>
+                <div class="text-slate-500 text-sm font-medium">篩選結果 / 樣本池筆數</div>
+                <div id="total-count" class="text-4xl font-black text-slate-800 mt-1">--</div>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="activity"></i></div>
+                    <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Hot Spot</span>
+                </div>
+                <div class="text-slate-500 text-sm font-medium">目前熱點區域</div>
+                <div id="top-district" class="text-3xl font-black text-slate-800 mt-1">--</div>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-indigo-50 rounded-lg text-indigo-600"><i data-lucide="bar-chart"></i></div>
+                    <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Top Issue</span>
+                </div>
+                <div class="text-slate-500 text-sm font-medium">主要派工類別</div>
+                <div id="top-category" class="text-3xl font-black text-slate-800 mt-1">--</div>
+            </div>
+        </div>
+
+        <!-- 互動視圖區 -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8">
+            <!-- 嵌入地圖視圖 -->
+            <div class="lg:col-span-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="map-pinned" size="18" class="text-blue-500"></i> 地理空間視圖
+                    </h3>
+                    <button onclick="restoreOverviewMap()" class="text-xs text-blue-600 hover:underline">返回總覽地圖</button>
+                </div>
+                <div class="map-wrapper">
+                    <iframe id="main-map" src="https://www.google.com/maps/d/u/1/embed?mid=15tn9_31mJBXqrsMOPV-9I7H-PMKa6zs&ehbc=2E312F&noprof=1"></iframe>
+                </div>
+                <p class="text-[10px] text-slate-400 mt-3 italic text-center">提示：點選下方案件，地圖將自動清洗地址資訊後跳轉</p>
+            </div>
+
+            <!-- 行政區長條圖 -->
+            <div class="lg:col-span-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h3 class="font-bold text-slate-800 flex items-center gap-2 mb-6">
+                    <i data-lucide="bar-chart-3" size="18" class="text-orange-500"></i> 行政區分佈統計 (代碼排序)
+                </h3>
+                <div class="chart-container h-[450px]">
+                    <canvas id="districtChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 比例分析區 -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="pie-chart" size="18" class="text-indigo-500"></i> 案件類型佔比分析
+                </h3>
+                <div class="flex gap-4 text-xs font-bold text-slate-400 border-b border-slate-100">
+                    <button onclick="switchPieTab('items')" id="tab-items" class="pb-2 transition-all tab-active">前十大派工項目</button>
+                    <button onclick="switchPieTab('groups')" id="tab-groups" class="pb-2 transition-all">七大核心類別</button>
+                </div>
+            </div>
+            <div class="chart-container h-[350px]" id="container-items">
+                <canvas id="categoryChart"></canvas>
+            </div>
+            <div class="chart-container hidden h-[350px]" id="container-groups">
+                <canvas id="groupPieChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 複選檢索區域 -->
+        <div class="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden mb-12">
+            <div class="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
+                <div class="flex flex-col gap-8">
+                    <div>
+                        <h3 class="text-xl font-bold text-slate-800">數據檢索與過濾</h3>
+                        <p class="text-slate-500 text-sm mt-1" id="search-hint">設定篩選條件後，點擊「執行搜尋」開始分析樣本</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-bold text-slate-600 flex items-center gap-2">
+                                    <i data-lucide="map" size="16"></i> 行政區選取 (依代碼排序)
+                                </label>
+                                <button onclick="toggleAllCheckboxes('dist')" class="text-xs text-blue-600 hover:underline">全選/反選</button>
+                            </div>
+                            <div class="grid grid-cols-3 md:grid-cols-4 gap-2" id="district-checks"></div>
+                        </div>
+
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-bold text-slate-600 flex items-center gap-2">
+                                    <i data-lucide="tag" size="16"></i> 派工類別選取 (可複選)
+                                </label>
+                                <button onclick="toggleAllCheckboxes('cat')" class="text-xs text-blue-600 hover:underline">全選/反選</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2" id="category-checks"></div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6 pt-4 border-t border-slate-100">
+                        <div class="relative max-w-2xl mx-auto">
+                            <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size="20"></i>
+                            <input type="text" id="searchInput" onkeypress="if(event.key==='Enter') searchData()" placeholder="搜尋編號、地址、派工內容..." 
+                                class="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 shadow-sm text-lg transition-all">
+                        </div>
+                        <div class="flex justify-center">
+                            <button id="searchBtn" onclick="searchData()" class="w-full md:w-1/2 flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-bold text-lg transition-all shadow-lg shadow-blue-100 active:scale-[0.98]">
+                                <i data-lucide="filter" size="22"></i> 執行搜尋
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100/50 text-slate-500 text-[11px] font-bold uppercase tracking-widest">
+                            <th class="px-8 py-5">案件編號</th>
+                            <th class="px-8 py-5">派工項目</th>
+                            <th class="px-8 py-5">案件地址</th>
+                            <th class="px-8 py-5">立案時間</th>
+                        </tr>
+                    </thead>
+                    <tbody id="data-table-body" class="divide-y divide-slate-50 text-slate-700"></tbody>
+                </table>
+            </div>
+
+            <div id="load-more-container" class="hidden p-8 text-center bg-slate-50/30 border-t border-slate-100">
+                <button id="loadMoreBtn" onclick="loadMore()" class="inline-flex items-center gap-2 px-8 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-2xl hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm">
+                    <i data-lucide="plus-circle" size="18"></i> 從資料庫載入更多
+                </button>
+                <div id="load-more-spinner" class="hidden justify-center items-center py-2">
+                    <div class="w-8 h-8 border-3 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
+                </div>
+            </div>
+
+            <div id="table-placeholder" class="p-24 text-center">
+                <div class="bg-blue-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i data-lucide="search" class="text-blue-400" size="40"></i>
+                </div>
+                <h4 class="text-slate-800 font-bold text-lg">等待檢索指令</h4>
+                <p class="text-slate-400 mt-2 max-w-xs mx-auto">請先設定上方篩選條件後，點擊「執行搜尋」。</p>
+            </div>
+            <div id="loading-table" class="hidden p-24 text-center">
+                <div class="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+                <p class="text-slate-500 font-medium">正在為您進行交叉過濾...</p>
+            </div>
+        </div>
+
+        <div id="loading" class="fixed inset-0 loading-overlay flex flex-col items-center justify-center z-50">
+            <div class="w-14 h-14 border-4 border-slate-100 border-t-blue-600 rounded-full animate-spin"></div>
+            <p class="text-slate-800 font-bold mt-6 tracking-widest animate-pulse text-center">正在同步市府大數據通道...</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://data.taipei/api/v1/dataset/95e364a7-4fc6-4f02-b248-876a7a76333a?scope=resourceAquire';
+        const OVERVIEW_MAP_URL = "https://www.google.com/maps/d/u/1/embed?mid=15tn9_31mJBXqrsMOPV-9I7H-PMKa6zs&ehbc=2E312F&noprof=1";
+        
+        // 樣本數據備援
+        const fallbackSampleData = [
+            {"案件編號": "2025113010478", "派工項目": "場所與設施噪音舉發", "案件地址": "士林區臺北市士林區義信里009鄰大南路１１０號1樓", "立案日期": "20251130", "立案時間": "235907"},
+            {"案件編號": "2025113010477", "派工項目": "大型廢棄物清運聯繫", "案件地址": "信義區110台灣臺北市信義區信義路六段12巷25號", "立案日期": "20251130", "立案時間": "235430"},
+            {"案件編號": "2025113010476", "派工項目": "路燈不亮或損壞", "案件地址": "中山區10491台灣臺北市中山區基湖路145號大直金碧大廈", "立案日期": "20251130", "立案時間": "234050"},
+            {"案件編號": "2025113010474", "派工項目": "場所與設施噪音舉發", "案件地址": "中山區臺北市中山區大直里027鄰北安路５７１號", "立案日期": "20251130", "立案時間": "233418"},
+            {"案件編號": "2025113010473", "派工項目": "場所與設施噪音舉發", "案件地址": "大同區臺北市大同區景星里004鄰環河北路二段８３號", "立案日期": "20251130", "立案時間": "233116"},
+            {"案件編號": "2025113010472", "派工項目": "場所與設施噪音舉發", "案件地址": "萬華區臺北市萬華區菜園里012鄰康定路８２號二樓", "立案日期": "20251130", "立案時間": "232628"},
+            {"案件編號": "2025113010470", "派工項目": "大型廢棄物清運聯繫", "案件地址": "信義區臺北市信義區松隆里009鄰松山路６５０巷１５弄２２號四樓", "立案日期": "20251130", "立案時間": "232319"},
+            {"案件編號": "2025113010469", "派工項目": "路燈不亮或損壞", "案件地址": "松山區八德路三段12巷4弄-八德路三段8巷", "立案日期": "20251130", "立案時間": "232308"},
+            {"案件編號": "2025113010468", "派工項目": "大型廢棄物清運聯繫", "案件地址": "士林區111台灣臺北市士林區中山北路七段148-1號", "立案日期": "20251130", "立案時間": "232001"},
+            {"案件編號": "2025113010467", "派工項目": "大型廢棄物清運聯繫", "案件地址": "松山區臺北市松山區民有里026鄰民權東路三段１０６巷１號二樓", "立案日期": "20251130", "立案時間": "231746"},
+            {"案件編號": "2025113010466", "派工項目": "污染舉發", "案件地址": "中山區臺北市中山區大直里018鄰北安路６１５號", "立案日期": "20251130", "立案時間": "231125"},
+            {"案件編號": "2025113010465", "派工項目": "路燈不亮或損壞", "案件地址": "南港區115台灣臺北市南港區南湖大橋8號", "立案日期": "20251130", "立案時間": "230552"},
+            {"案件編號": "2025113010464", "派工項目": "大型廢棄物清運聯繫", "案件地址": "中正區臺北市中正區永昌里002鄰汀州路一段２０６巷３號四樓", "立案日期": "20251130", "立案時間": "225630"},
+            {"案件編號": "2025113010463", "派工項目": "道路散落物或油漬處理", "案件地址": "中山區通北街-北安路", "立案日期": "20251130", "立案時間": "225623"},
+            {"案件編號": "2025113010462", "派工項目": "大型廢棄物清運聯繫", "案件地址": "大安區臺北市大安區龍安里009鄰青田街７巷４號三樓", "立案日期": "20251130", "立案時間": "225247"},
+            {"案件編號": "2025113010461", "派工項目": "路燈不亮或損壞", "案件地址": "士林區臺北市臺北市士林區後港里承德路四段318號", "立案日期": "20251130", "立案時間": "225036"},
+            {"案件編號": "2025113010460", "派工項目": "場所與設施噪音舉發", "案件地址": "中山區明水路-明水路439巷", "立案日期": "20251130", "立案時間": "224648"},
+            {"案件編號": "2025113010459", "派工項目": "大型廢棄物清運聯繫", "案件地址": "中山區臺北市中山區江山里003鄰合江街１１６巷１９號四樓", "立案日期": "20251130", "立案時間": "224437"},
+            {"案件編號": "2025113010458", "派工項目": "大型廢棄物清運聯繫", "案件地址": "內湖區臺北市內湖區安湖里005鄰東湖路４３巷１號6樓", "立案日期": "20251130", "立案時間": "223941"},
+            {"案件編號": "2025113010457", "派工項目": "場所與設施噪音舉發", "案件地址": "內湖區金湖路363巷", "立案日期": "20251130", "立案時間": "222806"}
+        ];
+
+        // 行政區列表：依照代碼由小至大排序
+        // 代碼：1:松山, 2:大安, 3:中正, 5:萬華, 9:大同, 10:中山, 11:文山, 13:南港, 14:內湖, 15:士林, 16:北投, 17:信義
+        const districts = ["松山區", "大安區", "中正區", "萬華區", "大同區", "中山區", "文山區", "南港區", "內湖區", "士林區", "北投區", "信義區"];
+        
+        const categoryMap = {
+            cat1: { name: "廢棄物處理", keywords: ["大型廢棄物清運聯繫", "鄰里無主垃圾清運"] },
+            cat2: { name: "環境公害", keywords: ["場所與設施噪音舉發", "污染舉發"] },
+            cat3: { name: "道路與路燈維護", keywords: ["路燈不亮或損壞", "路燈故障或設施損壞", "道路散落物或油漬處理"] },
+            cat4: { name: "交通設施", keywords: ["交通號誌異常", "交通標誌及設施物損壞", "交通標誌及設施物汙損"] },
+            cat5: { name: "動物相關", keywords: ["動物救援", "動物虐待傷害"] },
+            cat6: { name: "水利設施與供水", keywords: ["用戶無水", "漏水報修", "雨水下水道側溝清淤"] },
+            cat7: { name: "公共設施綜合維護", keywords: ["路樹處理", "橋樑積淹水", "隧道積淹水"] }
+        };
+
+        let charts = { district: null, category: null, groups: null };
+        let allSampleData = []; 
+        let currentOffset = 0;
+        let totalDBCount = 14150; 
+        const FETCH_LIMIT = 1000;
+
+        function initCheckboxes() {
+            const dContainer = document.getElementById('district-checks');
+            dContainer.innerHTML = districts.map(d => `
+                <label class="checkbox-card" id="card-dist-${d}">
+                    <input type="checkbox" name="dist" value="${d}" onchange="updateCardStyle(this)">
+                    <span class="text-xs font-medium">${d}</span>
+                </label>
+            `).join('');
+            const cContainer = document.getElementById('category-checks');
+            cContainer.innerHTML = Object.entries(categoryMap).map(([id, cat]) => `
+                <label class="checkbox-card" id="card-cat-${id}">
+                    <input type="checkbox" name="cat" value="${id}" onchange="updateCardStyle(this)">
+                    <span class="text-xs font-medium">${cat.name}</span>
+                </label>
+            `).join('');
+        }
+
+        function updateCardStyle(cb) { cb.parentElement.classList.toggle('active', cb.checked); }
+
+        function toggleAllCheckboxes(name) {
+            const cbs = document.querySelectorAll(`input[name="${name}"]`);
+            const allChecked = Array.from(cbs).every(cb => cb.checked);
+            cbs.forEach(cb => { cb.checked = !allChecked; updateCardStyle(cb); });
+        }
+
+        function getDistrictFromAddress(address) {
+            if (!address) return '未知';
+            const match = address.match(/(.{2}區)/);
+            return match ? match[1] : '其他';
+        }
+
+        function cleanAddressForMap(addr) {
+            if (!addr) return "";
+            let clean = addr.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xfee0));
+            const floorPatterns = [/\d+[Ff]/g, /\d+樓(之\d+)?/g, /[一二三四五六七八九十]+樓/g, /地下\d+層/g, /[Bb]\d+/g];
+            floorPatterns.forEach(pattern => { clean = clean.replace(pattern, ""); });
+            return clean.replace(/[ ,，、]+$/, "").trim();
+        }
+
+        function jumpToLocation(address) {
+            if (!address) return;
+            const iframe = document.getElementById('main-map');
+            const cleanedAddress = cleanAddressForMap(address);
+            const searchUrl = `https://maps.google.com/maps?q=${encodeURIComponent(cleanedAddress)}&output=embed&t=m&z=17`;
+            iframe.src = searchUrl;
+            document.querySelector('.map-wrapper').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function restoreOverviewMap() {
+            document.getElementById('main-map').src = OVERVIEW_MAP_URL;
+        }
+
+        function switchPieTab(tab) {
+            const containerItems = document.getElementById('container-items');
+            const containerGroups = document.getElementById('container-groups');
+            const tabItems = document.getElementById('tab-items');
+            const tabGroups = document.getElementById('tab-groups');
+            if (tab === 'items') {
+                containerItems.classList.remove('hidden'); containerGroups.classList.add('hidden');
+                tabItems.classList.add('tab-active'); tabGroups.classList.remove('tab-active');
+            } else {
+                containerItems.classList.add('hidden'); containerGroups.classList.remove('hidden');
+                tabItems.classList.remove('tab-active'); tabGroups.classList.add('tab-active');
+            }
+        }
+
+        async function fetchWithRetry(url, retries = 5) {
+            let delay = 2000;
+            const proxyNodes = [
+                (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+                (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+                (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`
+            ];
+            for (let i = 0; i < retries; i++) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                try {
+                    const cacheBuster = `_t=${Date.now()}_r=${Math.random().toString(36).substring(7)}`;
+                    const targetUrl = `${url}${url.includes('?') ? '&' : '?'}${cacheBuster}`;
+                    const proxyUrl = proxyNodes[i % proxyNodes.length](targetUrl);
+                    const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    if (response.status >= 500) throw new Error();
+                    const responseText = await response.text();
+                    if (!responseText || responseText.trim().toLowerCase().startsWith('<!doctype') || responseText.trim().startsWith('<html')) throw new Error();
+                    const json = JSON.parse(responseText);
+                    const data = json.contents ? (typeof json.contents === 'string' ? JSON.parse(json.contents) : json.contents) : json;
+                    if (data && data.result) return data.result;
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    if (i === retries - 1) throw e;
+                    await new Promise(res => setTimeout(res, delay));
+                    delay *= 1.5;
+                }
+            }
+            return null;
+        }
+
+        async function initDashboard() {
+            showLoading(true);
+            updateStatus('正在同步初始化樣本...', 'bg-slate-200', 'text-slate-600');
+            try {
+                const result = await fetchWithRetry(`${API_BASE_URL}&limit=${FETCH_LIMIT}`);
+                if (result && result.results) {
+                    allSampleData = result.results;
+                    currentOffset = FETCH_LIMIT;
+                    updateDashboardUI(allSampleData);
+                    updateStatus('● 實時數據已同步', 'bg-emerald-100', 'text-emerald-700');
+                } else { throw new Error(); }
+            } catch (err) {
+                allSampleData = fallbackSampleData;
+                updateDashboardUI(allSampleData);
+                updateStatus('● 樣本展示模式', 'bg-amber-100', 'text-amber-700');
+            } finally {
+                setTimeout(() => showLoading(false), 500);
+            }
+        }
+
+        function resetFilters() {
+            document.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; updateCardStyle(cb); });
+            document.getElementById('searchInput').value = "";
+            document.getElementById('data-table-body').innerHTML = "";
+            document.getElementById('table-placeholder').classList.remove('hidden');
+            restoreOverviewMap();
+            searchData();
+        }
+
+        async function searchData() {
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+            const selectedDists = Array.from(document.querySelectorAll('input[name="dist"]:checked')).map(cb => cb.value);
+            const selectedCats = Array.from(document.querySelectorAll('input[name="cat"]:checked')).map(cb => cb.value);
+            
+            document.getElementById('table-placeholder').classList.add('hidden');
+            document.getElementById('loading-table').classList.remove('hidden');
+
+            const filtered = allSampleData.filter(item => {
+                const d = getDistrictFromAddress(item['案件地址']);
+                const p = (item['派工項目'] || '').toLowerCase();
+                const a = (item['案件地址'] || '').toLowerCase();
+                const id = (item['案件編號'] || '').toLowerCase();
+                const dMatch = selectedDists.length === 0 || selectedDists.includes(d);
+                let cMatch = selectedCats.length === 0;
+                if (!cMatch) cMatch = selectedCats.some(catId => categoryMap[catId].keywords.some(kw => p.includes(kw.toLowerCase())));
+                const kMatch = !keyword || (p.includes(keyword) || a.includes(keyword) || id.includes(keyword));
+                return dMatch && cMatch && kMatch;
+            });
+
+            updateDashboardUI(filtered);
+            renderTable(filtered);
+            document.getElementById('loading-table').classList.add('hidden');
+            document.getElementById('load-more-container').classList.toggle('hidden', allSampleData.length < 100 || allSampleData === fallbackSampleData);
+            document.getElementById('search-hint').innerText = `分析完成：符合項 ${filtered.length} / 樣本數 ${allSampleData.length}`;
+            lucide.createIcons();
+        }
+
+        async function loadMore() {
+            const btn = document.getElementById('loadMoreBtn');
+            const spinner = document.getElementById('load-more-spinner');
+            btn.classList.add('hidden'); spinner.classList.remove('hidden'); spinner.classList.add('flex');
+            try {
+                const result = await fetchWithRetry(`${API_BASE_URL}&limit=${FETCH_LIMIT}&offset=${currentOffset}`);
+                if (result && result.results) {
+                    allSampleData = [...allSampleData, ...result.results];
+                    currentOffset += FETCH_LIMIT;
+                    searchData();
+                }
+            } catch (e) { console.error(e); } finally {
+                spinner.classList.add('hidden'); spinner.classList.remove('flex'); btn.classList.remove('hidden');
+            }
+        }
+
+        function updateDashboardUI(data) {
+            const districtsCounts = {};
+            const itemsCounts = {};
+            const groupsCounts = { cat1: 0, cat2: 0, cat3: 0, cat4: 0, cat5: 0, cat6: 0, cat7: 0, other: 0 };
+
+            data.forEach(i => {
+                const d = getDistrictFromAddress(i['案件地址']);
+                const p = i['派工項目'] || '其他';
+                districtsCounts[d] = (districtsCounts[d] || 0) + 1;
+                itemsCounts[p] = (itemsCounts[p] || 0) + 1;
+                let matched = false;
+                for (let k in categoryMap) {
+                    if (categoryMap[k].keywords.some(kw => p.includes(kw))) {
+                        groupsCounts[k]++; matched = true; break;
+                    }
+                }
+                if (!matched) groupsCounts.other++;
+            });
+
+            const sortedDist = Object.entries(districtsCounts).sort((a,b) => b[1]-a[1]);
+            const sortedItem = Object.entries(itemsCounts).sort((a,b) => b[1]-a[1]);
+
+            document.getElementById('total-count').innerText = `${data.length.toLocaleString()} / ${allSampleData.length.toLocaleString()}`;
+            document.getElementById('top-district').innerText = sortedDist[0] ? sortedDist[0][0] : '--';
+            document.getElementById('top-category').innerText = sortedItem[0] ? sortedItem[0][0] : '--';
+
+            renderCharts(districtsCounts, itemsCounts, groupsCounts);
+        }
+
+        function renderCharts(dCounts, iCounts, gCounts) {
+            const dCtx = document.getElementById('districtChart').getContext('2d');
+            if (charts.district) charts.district.destroy();
+            charts.district = new Chart(dCtx, {
+                type: 'bar',
+                data: { labels: districts, datasets: [{ label: '案件量', data: districts.map(l => dCounts[l] || 0), backgroundColor: '#3b82f6', borderRadius: 4 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    onClick: (evt, elements) => {
+                        if (elements.length > 0) {
+                            const label = districts[elements[0].index];
+                            const cb = document.querySelector(`input[name="dist"][value="${label}"]`);
+                            cb.checked = !cb.checked; updateCardStyle(cb); searchData();
+                        }
+                    }
+                }
+            });
+
+            const cCtx = document.getElementById('categoryChart').getContext('2d');
+            if (charts.category) charts.category.destroy();
+            const sI = Object.entries(iCounts).sort((a,b) => b[1]-a[1]).slice(0, 10);
+            charts.category = new Chart(cCtx, {
+                type: 'doughnut',
+                data: { labels: sI.map(x=>x[0]), datasets: [{ data: sI.map(x=>x[1]), backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b', '#0ea5e9', '#f43f5e'], borderWidth: 0 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 10, usePointStyle: true } } },
+                    cutout: '65%',
+                    onClick: (evt, elements) => { if (elements.length > 0) { document.getElementById('searchInput').value = sI[elements[0].index][0]; searchData(); } }
+                }
+            });
+
+            const gCtx = document.getElementById('groupPieChart').getContext('2d');
+            if (charts.groups) charts.groups.destroy();
+            const gLabels = Object.keys(categoryMap).map(k => categoryMap[k].name).concat(["其他"]);
+            const gIds = Object.keys(categoryMap).concat(["other"]);
+            charts.groups = new Chart(gCtx, {
+                type: 'doughnut',
+                data: { labels: gLabels, datasets: [{ data: gIds.map(id => gCounts[id]), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#94a3b8'], borderWidth: 0 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 10, usePointStyle: true } } },
+                    cutout: '65%',
+                    onClick: (evt, elements) => {
+                        if (elements.length > 0 && gIds[elements[0].index] !== 'other') {
+                            const cb = document.querySelector(`input[name="cat"][value="${gIds[elements[0].index]}"]`);
+                            cb.checked = !cb.checked; updateCardStyle(cb); searchData();
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('data-table-body');
+            tbody.innerHTML = data.map(i => `
+                <tr class="data-row hover:bg-blue-50/40 border-b border-slate-50 transition-all text-xs" onclick="jumpToLocation('${i['案件地址']}')">
+                    <td class="px-8 py-4 font-mono text-slate-400">${i['案件編號'] || '-'}</td>
+                    <td class="px-8 py-4 font-bold text-slate-800">${i['派工項目'] || '-'}</td>
+                    <td class="px-8 py-4 text-slate-500">
+                        <span class="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-bold mr-2">${getDistrictFromAddress(i['案件地址'])}</span>
+                        ${i['案件地址'] || '-'}
+                    </td>
+                    <td class="px-8 py-4 text-slate-400 font-mono">${(i['立案日期'] || '') + ' ' + (i['立案時間'] || '')}</td>
+                </tr>
+            `).join('');
+        }
+
+        function showLoading(s) { document.getElementById('loading').style.display = s ? 'flex' : 'none'; }
+        function updateStatus(t, b, c) {
+            const e = document.getElementById('data-status');
+            e.className = `px-3 py-1 rounded-full text-xs font-bold ${b} ${c} transition-all`;
+            e.innerText = t;
+        }
+
+        window.onload = () => {
+            initCheckboxes();
+            lucide.createIcons();
+            initDashboard();
+        };
+    </script>
+</body>
+</html>
