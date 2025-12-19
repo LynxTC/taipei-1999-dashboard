@@ -352,7 +352,7 @@
             if (!address) return;
             const iframe = document.getElementById('main-map');
             const cleanedAddress = cleanAddressForMap(address);
-            const searchUrl = `https://maps.google.com/maps?q=${encodeURIComponent(cleanedAddress)}&output=embed&t=m&z=17`;
+            const searchUrl = `https://maps.google.com/maps?q=$${encodeURIComponent(cleanedAddress)}&output=embed&t=m&z=17`;
             iframe.src = searchUrl;
             document.querySelector('.map-wrapper').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -594,3 +594,4 @@
 </body>
 
 </html>
+
