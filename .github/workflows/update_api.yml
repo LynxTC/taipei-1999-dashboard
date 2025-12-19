@@ -1,0 +1,35 @@
+name: Monthly API ID Update
+
+on:
+  schedule:
+    # 設定為每個月 10 號的凌晨 0 點執行 (UTC 時間)
+    - cron: '0 0 10 * *'
+  workflow_dispatch: # 允許您手動點擊執行按鈕來測試
+
+jobs:
+  update-api-id:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: 檢出儲存庫代碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: 安裝必要套件
+        run: pip install requests
+
+      - name: 執行搜尋腳本
+        run: python update_api_script.py
+
+      - name: 提交並推送更新
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add index.html
+          git diff --quiet && git diff --staged --quiet || (git commit -m "自動更新 1999 派工 API ID" && git push)
