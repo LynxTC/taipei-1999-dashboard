@@ -324,11 +324,29 @@
 
         function cleanAddressForMap(addr) {
             if (!addr) return "";
+            
+            // 1. 先將全形數字轉為半形，方便後續正規表示式匹配
             let clean = addr.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xfee0));
-            const floorPatterns = [/\d+[Ff]/g, /\d+樓(之\d+)?/g, /[一二三四五六七八九十]+樓/g, /地下\d+層/g, /[Bb]\d+/g];
-            floorPatterns.forEach(pattern => { clean = clean.replace(pattern, ""); });
+            
+            // 2. 定義要剔除的模式：包含 里、鄰、樓層資訊
+            const removePatterns = [
+                /\S+里/g,                         // 剔除「XX里」(例如：義信里)
+                /\d+鄰/g,                         // 剔除「XX鄰」(例如：009鄰)
+                /\d+[Ff]/g,                       // 剔除「5F」
+                /\d+樓(之\d+)?/g,                  // 剔除「5樓」、「5樓之1」
+                /[一二三四五六七八九十]+樓/g,       // 剔除中文樓層「五樓」
+                /地下\d+層/g,                      // 剔除「地下1層」
+                /[Bb]\d+/g                        // 剔除「B1」
+            ];
+        
+            // 3. 執行剔除
+            removePatterns.forEach(pattern => {
+                clean = clean.replace(pattern, "");
+            });
+        
+            // 4. 清除前後空格及末尾多餘標點，並回傳
             return clean.replace(/[ ,，、]+$/, "").trim();
-        }
+        }}
 
         function jumpToLocation(address) {
             if (!address) return;
@@ -574,4 +592,5 @@
         };
     </script>
 </body>
+
 </html>
