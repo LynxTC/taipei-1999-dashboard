@@ -43,7 +43,7 @@ Taipei City 1999 Dispatch Dashboard
 
 1. 下載或 clone 本專案
    ```bash
-   git clone https://github.com/your-repo/taipei-1999-dashboard.git
+   git clone https://github.com/LynxTC/taipei-1999-dashboard.git
    ```
 2. 直接以瀏覽器開啟 `index.html`
 3. 透過地圖與互動元件探索派工資料
