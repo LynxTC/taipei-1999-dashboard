@@ -214,7 +214,7 @@ const CATEGORY_MAP = {
 };
 
 const DISTRICTS = ["松山區", "大安區", "中正區", "萬華區", "大同區", "中山區", "文山區", "南港區", "內湖區", "士林區", "北投區", "信義區"];
-const API_URL = 'https://data.taipei/api/v1/dataset/95e364a7-4fc6-4f02-b248-876a7a76333a?scope=resourceAquire';
+const API_URL = 'https://data.taipei/api/v1/dataset/df579d7f-5d29-4d00-9964-1a99b26a1a1e?scope=resourceAquire';
 
 // --- 狀態定義 ---
 const initializing = ref(true);
