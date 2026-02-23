@@ -22,7 +22,9 @@ jobs:
           python-version: '3.x'
 
       - name: 安裝必要套件
-        run: pip install requests
+        run: |
+          pip install playwright
+          playwright install chromium
 
       - name: 執行搜尋腳本
         run: python update_api_script.py
