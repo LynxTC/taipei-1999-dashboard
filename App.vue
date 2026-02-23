@@ -156,7 +156,7 @@
                 <td class="px-8 py-4 text-sm text-slate-600">
                   <div class="flex items-center gap-2">
                     <span class="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold">{{ getDistrict(item['案件地址'])
-                      }}</span>
+                    }}</span>
                     <span class="break-all">{{ item['案件地址'] }}</span>
                   </div>
                 </td>
@@ -261,7 +261,18 @@ let charts = { dist: null, cat: null };
 const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 const robustFetch = async (targetUrl, timeout = 15000) => {
-  const proxyEndpoints = [`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`];
+  // [關鍵修正] 在「目標 URL」本身加入隨機參數，強制 Proxy 認為這是新請求，避開 Proxy 內部的快取
+  const urlWithTimestamp = `${targetUrl}&_cb=${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const encoded = encodeURIComponent(urlWithTimestamp);
+
+  const proxyEndpoints = [
+    `https://api.allorigins.win/get?url=${encoded}`, // allorigins 支援度最好，放第一位
+    `https://corsproxy.io/?${encoded}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
+    `https://thingproxy.freeboard.io/fetch/${targetUrl}`,
+    targetUrl // 最後嘗試直連 (以防使用者有安裝 CORS 外掛或 API 恢復正常)
+  ];
+
   for (const endpoint of proxyEndpoints) {
     try {
       const controller = new AbortController();
@@ -270,11 +281,25 @@ const robustFetch = async (targetUrl, timeout = 15000) => {
       clearTimeout(id);
       if (!res.ok) continue;
       const data = await res.json();
-      const finalData = typeof data.contents === 'string' ? JSON.parse(data.contents) : data;
+      // 處理 allorigins 可能將 JSON 包在 contents 字串中的情況
+      let finalData = data;
+      if (data.contents) {
+        // 檢查 allorigins 的狀態碼，若非 200 則視為失敗
+        if (data.status && data.status.http_code && data.status.http_code !== 200) continue;
+        try {
+          finalData = typeof data.contents === 'string' ? JSON.parse(data.contents) : data.contents;
+        } catch (e) {
+          // 如果 JSON 解析失敗，嘗試直接從字串中提取 count (救急用)
+          const match = String(data.contents).match(/"count":\s*(\d+)/);
+          if (match) {
+            finalData = { result: { count: Number(match[1]), results: [] } };
+          }
+        }
+      }
       if (finalData && finalData.result) return finalData;
-    } catch (e) { console.warn("Proxy 嘗試中..."); }
+    } catch (e) { console.warn(`Proxy ${endpoint} 嘗試失敗`, e); }
   }
-  throw new Error("API失敗");
+  throw new Error("所有 API 來源皆無法連線");
 };
 
 const fetchRandomSampling = async (append = false) => {
@@ -282,16 +307,27 @@ const fetchRandomSampling = async (append = false) => {
   loadingMore.value = true;
   try {
     if (dbTotalCount.value === 0) {
-      const initData = await robustFetch(`${API_URL}&limit=1`);
-      dbTotalCount.value = initData.result.count;
+      try {
+        const initData = await robustFetch(`${API_URL}&limit=1`);
+        if (initData.result && initData.result.count !== undefined) {
+          dbTotalCount.value = Number(initData.result.count);
+          console.log("成功取得資料總筆數:", dbTotalCount.value);
+        }
+      } catch (e) {
+        console.warn("無法取得總筆數，啟用盲查模式", e);
+        dbTotalCount.value = 2000; // 設定一個預設值讓後續能繼續執行
+      }
     }
     const numJumps = 5;
     const perJump = 100;
     const collectedData = [];
     for (let i = 0; i < numJumps; i++) {
-      const randomOffset = Math.floor(Math.random() * (dbTotalCount.value - perJump));
-      const jumpData = await robustFetch(`${API_URL}&limit=${perJump}&offset=${randomOffset}`);
-      if (jumpData.result.results) collectedData.push(...jumpData.result.results);
+      try {
+        const maxOffset = Math.max(0, dbTotalCount.value - perJump);
+        const randomOffset = Math.floor(Math.random() * maxOffset);
+        const jumpData = await robustFetch(`${API_URL}&limit=${perJump}&offset=${randomOffset}`);
+        if (jumpData.result && jumpData.result.results) collectedData.push(...jumpData.result.results);
+      } catch (e) { console.warn("部分資料加載失敗，跳過此批次", e); }
       await delay(300);
     }
     allData.value = append ? [...allData.value, ...collectedData] : collectedData;
@@ -355,7 +391,7 @@ const cleanAddress = (addr) => {
     // 中文清洗邏輯
     clean = clean.replace(/(台灣|臺北市|台北市)/g, '');
     clean = clean.replace(/(\d+鄰)|(第\d+鄰)|[\u4e00-\u9fa5]+里/g, '');
-    const floorPattern = /([0-9一二三四五六七八九十]+[樓層Ff])|(地下[0-9一二三四五六七八九十]+[樓層Ff])/g;
+    const floorPattern = /([0-9一二三四五六七八九十]+[樓層Ff])|(地下[0-9一二三四五六七八九十]+[樓層Ff])|([Bb][0-9]+[Ff]?)/g;
     clean = clean.replace(floorPattern, '');
   }
 
@@ -438,6 +474,7 @@ const getTopCategory = () => {
 const formatDate = (d) => String(d).replace(/(\d{4})(\d{2})(\d{2})/, '$1/$2/$3');
 
 const updateCharts = () => {
+  if (typeof Chart === 'undefined') return;
   const dC = {}; const cC = {}; Object.keys(CATEGORY_MAP).forEach(k => cC[k] = 0); cC["其他"] = 0;
   filteredData.value.forEach(i => { const d = getDistrict(i['案件地址']); dC[d] = (dC[d] || 0) + 1; const c = categorizeItem(i['派工項目']); cC[c] = (cC[c] || 0) + 1; });
 
