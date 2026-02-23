@@ -17,30 +17,46 @@ def fetch_latest_id():
             print(f"前往頁面: {DATASET_URL}")
             page.goto(DATASET_URL)
             
+            # [新增] 等待網路狀態穩定 (避免頁面還沒載入完就執行)
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except:
+                print("等待網路閒置超時，繼續嘗試...")
+
             # 嘗試關閉可能出現的 API 說明對話框
             try:
-                close_btn = page.locator("#close-api-dialog-0")
-                if close_btn.is_visible(timeout=5000):
-                    close_btn.click()
-                    print("已關閉 API 對話框")
+                # 使用 click 帶 timeout 來自動等待元素出現 (最多等 3 秒)
+                page.locator("#close-api-dialog-0").click(timeout=3000)
+                print("已關閉 API 對話框")
             except Exception:
                 pass # 忽略對話框錯誤，繼續執行
 
-            # 尋找包含 API URL 的儲存格
-            # 使用者提供的定位器: page.get_by_role("cell", name="https://data.taipei/api/v1/")
-            api_cell = page.get_by_role("cell", name="https://data.taipei/api/v1/").first
-            
-            if api_cell.is_visible():
-                url_text = api_cell.inner_text()
-                print(f"找到 API URL 文字: {url_text}")
+            # 策略 1: 嘗試透過 UI 定位獲取 (優先)
+            try:
+                api_cell = page.get_by_role("cell", name="https://data.taipei/api/v1/").first
+                # [修正] 顯式等待元素可見，最多等 5 秒
+                api_cell.wait_for(state="visible", timeout=5000)
                 
-                # 提取 UUID (格式: .../dataset/{UUID}?scope...)
+                url_text = api_cell.inner_text()
+                print(f"UI 定位找到文字: {url_text}")
+                
                 match = re.search(r'dataset/([a-f0-9-]{36})', url_text)
                 if match:
                     new_id = match.group(1)
-                    print(f"解析成功！最新 ID 為: {new_id}")
+                    print(f"UI 解析成功！最新 ID 為: {new_id}")
                     return new_id
+            except Exception as e:
+                print(f"UI 定位解析失敗，轉為搜尋原始碼... ({e})")
             
+            # 策略 2: 全頁原始碼暴力搜尋 (備案)
+            # 直接在 HTML 中搜尋 "api/v1/dataset/{UUID}" 格式
+            content = page.content()
+            match = re.search(r'api/v1/dataset/([a-f0-9-]{36})', content)
+            if match:
+                new_id = match.group(1)
+                print(f"原始碼解析成功！最新 ID 為: {new_id}")
+                return new_id
+
             print("無法從頁面中解析出有效的 API ID")
             return None
 
