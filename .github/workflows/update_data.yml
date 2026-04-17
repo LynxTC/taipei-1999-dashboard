@@ -1,0 +1,41 @@
+name: Daily Data Fetch
+
+on:
+  schedule:
+    # 設定為每月 10 日凌晨 1 點 (UTC) 執行，約為台北時間早上 9 點
+    - cron: '0 1 10 * *'
+  workflow_dispatch: # 允許手動點擊 "Run workflow" 按鈕來觸發
+
+jobs:
+  fetch-and-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 必須給予寫入權限才能夠 commit and push
+    
+    steps:
+      - name: 檢出儲存庫 (Checkout repository)
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 3.x 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: 安裝依賴套件 (Install dependencies)
+        run: pip install requests
+
+      - name: 執行資料抓取腳本 (Run data fetching script)
+        run: python fetch_data.py
+
+      - name: 提交並推送變更 (Commit and push if data changed)
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add public/1999_data.json
+          # 檢查是否有檔案變更，若有才執行 commit & push
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: 自動更新每日派工數據"
+            git push
+          else
+            echo "資料無變更，無需提交。"
+          fi

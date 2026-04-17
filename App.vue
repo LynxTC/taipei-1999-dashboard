@@ -31,10 +31,10 @@
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button @click="loadMoreData" :disabled="loadingMore"
+        <button @click="fetchData" :disabled="initializing"
           class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 shadow-sm transition-all active:scale-95 disabled:opacity-50 font-bold">
-          <i data-lucide="plus-circle" :class="{ 'animate-spin': loadingMore }"></i>
-          {{ loadingMore ? '加載中...' : '查看更多' }}
+          <i data-lucide="refresh-cw" :class="{ 'animate-spin': initializing }"></i>
+          {{ initializing ? '載入中...' : '重新整理' }}
         </button>
         <button @click="resetFilters"
           class="flex items-center gap-2 bg-white border px-5 py-2.5 rounded-xl hover:bg-slate-50 shadow-sm transition-all active:scale-95">
@@ -42,6 +42,13 @@
         </button>
       </div>
     </header>
+
+    <div v-if="errorMessage"
+      class="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl mb-8 flex items-center gap-3 shadow-sm text-red-700">
+      <i data-lucide="alert-triangle" class="w-6 h-6 flex-shrink-0"></i>
+      <div><span class="font-bold">資料讀取失敗：</span>{{ errorMessage }}<br><span class="text-sm">請確認 1999_data.json 是否正確放置於
+          public 資料夾中，或檢查網路連線。</span></div>
+    </div>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
       <div v-for="card in statCards" :key="card.id"
@@ -237,11 +244,9 @@ const CATEGORY_MAP = {
 };
 
 const DISTRICTS = ["松山區", "大安區", "中正區", "萬華區", "大同區", "中山區", "文山區", "南港區", "內湖區", "士林區", "北投區", "信義區"];
-const API_URL = 'https://data.taipei/api/v1/dataset/8aec2bb2-b334-4572-9cbe-b0dfd3aae8fa?scope=resourceAquire';
 
 // --- 狀態定義 ---
 const initializing = ref(true);
-const loadingMore = ref(false);
 const allData = ref([]);
 const dbTotalCount = ref(0);
 const searchKeyword = ref('');
@@ -254,91 +259,38 @@ const selectedCategoryFilter = ref('');
 const currentSort = ref('time_desc');
 const currentPage = ref(1);
 const pageSize = ref(10);
+const errorMessage = ref('');
 
 let charts = { dist: null, cat: null };
 
 // --- 網路連線 ---
-const delay = (ms) => new Promise(res => setTimeout(res, ms));
-
-const robustFetch = async (targetUrl, timeout = 15000) => {
-  // [關鍵修正] 在「目標 URL」本身加入隨機參數，強制 Proxy 認為這是新請求，避開 Proxy 內部的快取
-  const urlWithTimestamp = `${targetUrl}&_cb=${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  const encoded = encodeURIComponent(urlWithTimestamp);
-
-  const proxyEndpoints = [
-    `https://api.allorigins.win/get?url=${encoded}`, // allorigins 支援度最好，放第一位
-    `https://corsproxy.io/?${encoded}`,
-    `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
-    `https://thingproxy.freeboard.io/fetch/${targetUrl}`,
-    targetUrl // 最後嘗試直連 (以防使用者有安裝 CORS 外掛或 API 恢復正常)
-  ];
-
-  for (const endpoint of proxyEndpoints) {
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      const res = await fetch(endpoint, { signal: controller.signal });
-      clearTimeout(id);
-      if (!res.ok) continue;
-      const data = await res.json();
-      // 處理 allorigins 可能將 JSON 包在 contents 字串中的情況
-      let finalData = data;
-      if (data.contents) {
-        // 檢查 allorigins 的狀態碼，若非 200 則視為失敗
-        if (data.status && data.status.http_code && data.status.http_code !== 200) continue;
-        try {
-          finalData = typeof data.contents === 'string' ? JSON.parse(data.contents) : data.contents;
-        } catch (e) {
-          // 如果 JSON 解析失敗，嘗試直接從字串中提取 count (救急用)
-          const match = String(data.contents).match(/"count":\s*(\d+)/);
-          if (match) {
-            finalData = { result: { count: Number(match[1]), results: [] } };
-          }
-        }
-      }
-      if (finalData && finalData.result) return finalData;
-    } catch (e) { console.warn(`Proxy ${endpoint} 嘗試失敗`, e); }
-  }
-  throw new Error("所有 API 來源皆無法連線");
-};
-
-const fetchRandomSampling = async (append = false) => {
-  if (!append) { initializing.value = true; allData.value = []; }
-  loadingMore.value = true;
+const fetchData = async () => {
+  initializing.value = true;
+  errorMessage.value = '';
   try {
-    if (dbTotalCount.value === 0) {
-      try {
-        const initData = await robustFetch(`${API_URL}&limit=1`);
-        if (initData.result && initData.result.count !== undefined) {
-          dbTotalCount.value = Number(initData.result.count);
-          console.log("成功取得資料總筆數:", dbTotalCount.value);
-        }
-      } catch (e) {
-        console.warn("無法取得總筆數，啟用盲查模式", e);
-        dbTotalCount.value = 2000; // 設定一個預設值讓後續能繼續執行
-      }
+    // [架構優化] 直接讀取由 GitHub Action 每日自動生成的靜態 JSON 檔案
+    // 這樣可以完全避免對 API 的直接請求，解決頻繁請求導致的 5xx 錯誤，並大幅提升載入速度
+    // 使用 import.meta.env.BASE_URL 自動處理本機 (/) 與 GitHub Pages (/repo/) 的路徑差異
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const response = await fetch(`${baseUrl}1999_data.json?t=${Date.now()}`);
+    if (!response.ok) {
+      throw new Error(`無法載入靜態資料檔，狀態：${response.status}`);
     }
-    const numJumps = 5;
-    const perJump = 100;
-    const collectedData = [];
-    for (let i = 0; i < numJumps; i++) {
-      try {
-        const maxOffset = Math.max(0, dbTotalCount.value - perJump);
-        const randomOffset = Math.floor(Math.random() * maxOffset);
-        const jumpData = await robustFetch(`${API_URL}&limit=${perJump}&offset=${randomOffset}`);
-        if (jumpData.result && jumpData.result.results) collectedData.push(...jumpData.result.results);
-      } catch (e) { console.warn("部分資料加載失敗，跳過此批次", e); }
-      await delay(300);
-    }
-    allData.value = append ? [...allData.value, ...collectedData] : collectedData;
-  } catch (e) { console.error("加載錯誤"); } finally {
+    const data = await response.json();
+
+    allData.value = data;
+    dbTotalCount.value = data.length; // 總筆數現在就是陣列的長度
+
+    console.log(`✅ 成功從靜態檔案載入 ${allData.value.length} 筆資料`);
+
+  } catch (e) {
+    console.error("全域資料加載時發生嚴重錯誤:", e);
+    errorMessage.value = e.message || "發生未知錯誤";
+  } finally {
     initializing.value = false;
-    loadingMore.value = false;
     nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); updateCharts(); });
   }
 };
-
-const loadMoreData = () => fetchRandomSampling(true);
 
 // --- [核心修正] 地址清洗函數 ---
 const cleanAddress = (addr) => {
@@ -423,7 +375,8 @@ const dataTimeRange = computed(() => {
 const filteredData = computed(() => {
   let data = [...allData.value];
   const kw = searchKeyword.value.trim().toLowerCase();
-  if (kw) data = data.filter(i => (i['案件地址'] + i['派工項目'] + i['案件編號']).toLowerCase().includes(kw));
+  // [防護] 確保字串相加前不會有 null，導致 .toLowerCase() 崩潰
+  if (kw) data = data.filter(i => ((i['案件地址'] || '') + (i['派工項目'] || '') + (i['案件編號'] || '')).toLowerCase().includes(kw));
   if (selectedDistrictFilter.value) data = data.filter(i => (i['案件地址'] || '').includes(selectedDistrictFilter.value));
   if (selectedCategoryFilter.value) data = data.filter(i => categorizeItem(i['派工項目']) === selectedCategoryFilter.value);
   if (startDate.value || endDate.value) {
@@ -453,11 +406,18 @@ const totalPages = computed(() => Math.ceil(filteredData.value.length / pageSize
 const pagedData = computed(() => filteredData.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value));
 
 const categorizeItem = (item) => {
+  // [防護] 處理派工項目為 null 的情況
+  if (!item) return "其他";
   for (const [cat, ks] of Object.entries(CATEGORY_MAP)) { if (ks.some(k => item.includes(k))) return cat; }
   return "其他";
 };
 
-const getDistrict = (addr) => (addr.match(/(.{2,3}區)/) || ['', '其他'])[1];
+const getDistrict = (addr) => {
+  // [防護] 防止地址為 null 時執行 .match 導致 Vue 渲染完全中斷
+  if (!addr || typeof addr !== 'string') return '其他';
+  return (addr.match(/(.{2,3}區)/) || ['', '其他'])[1];
+};
+
 const getTopDistrict = () => {
   if (filteredData.value.length === 0) return '--';
   const c = {}; filteredData.value.forEach(i => { const d = getDistrict(i['案件地址']); c[d] = (c[d] || 0) + 1; });
@@ -493,7 +453,7 @@ const resetFilters = () => { searchKeyword.value = ''; selectedDistrictFilter.va
 
 watch([filteredData, pageSize, currentSort, selectedDistrictFilter, selectedCategoryFilter, startDate, endDate], () => { currentPage.value = 1; nextTick(() => updateCharts()); });
 
-onMounted(() => fetchRandomSampling(false));
+onMounted(() => fetchData());
 </script>
 
 <style scoped>

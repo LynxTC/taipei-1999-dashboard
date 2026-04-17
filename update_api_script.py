@@ -66,9 +66,9 @@ def fetch_latest_id():
         finally:
             browser.close()
 
-def update_app_vue(new_id):
-    # 更新 App.vue
-    file_path = 'App.vue'
+def update_target_file(new_id):
+    # [修正] 改為更新真正負責打 API 的 fetch_data.py
+    file_path = 'fetch_data.py'
     if not os.path.exists(file_path):
         print(f"錯誤：找不到 {file_path}")
         return
@@ -76,8 +76,8 @@ def update_app_vue(new_id):
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # 比對 App.vue 中的 API_URL 定義
-    # const API_URL = '.../dataset/UUID?scope...';
+    # 比對 fetch_data.py 中的 API_URL 定義
+    # API_URL = '.../dataset/UUID?scope...';
     pattern = r'(dataset\/)([a-f0-9-]{36})(\?scope)'
     
     # 檢查並更新
@@ -95,10 +95,10 @@ def update_app_vue(new_id):
         print(f"更新成功：{old_id} -> {new_id}")
         return True
     else:
-        print("在 App.vue 中找不到符合格式的 API 連結。")
+        print(f"在 {file_path} 中找不到符合格式的 API 連結。")
         return False
 
 if __name__ == "__main__":
     latest_id = fetch_latest_id()
     if latest_id:
-        update_app_vue(latest_id)
+        update_target_file(latest_id)

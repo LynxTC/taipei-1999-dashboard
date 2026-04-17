@@ -19,10 +19,10 @@ Taipei City 1999 Dispatch Dashboard
 
 ## 🛠 技術架構
 
-- 前端框架：HTML / CSS / JavaScript  
-- 視覺化套件：D3.js（或對應使用之視覺化函式庫）  
-- 地圖工具：Leaflet（或專案中實際使用之地圖套件）  
-- 資料來源：臺北市政府開放資料平台（1999 派工相關資料）
+- **前端框架**：React / Vite
+- **視覺化套件**：D3.js / Recharts
+- **地圖工具**：Leaflet.js / React-Leaflet
+- **資料來源**：[臺北市政府開放資料平台](https://data.taipei/)（1999 派工相關資料）
 
 ---
 
