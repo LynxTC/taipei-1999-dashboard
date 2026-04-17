@@ -1,4 +1,4 @@
-name: Daily Data Fetch
+name: Monthly Data Fetch
 
 on:
   schedule:
