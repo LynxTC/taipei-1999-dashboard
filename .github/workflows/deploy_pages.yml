@@ -1,0 +1,50 @@
+name: Deploy Vite App to GitHub Pages
+
+on:
+  # 只要有新的 commit 推送到 main 分支 (包含自動更新資料的推播)，就會觸發部署
+  push:
+    branches: ["main"]
+  # 允許你從 Actions 頁面手動點擊按鈕觸發
+  workflow_dispatch:
+
+# 設定 GitHub Token 權限，允許將編譯好的檔案發布到 Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # 任務一：編譯打包 (Build)
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出程式碼 (Checkout)
+        uses: actions/checkout@v4
+      - name: 設定 Node.js 環境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 安裝依賴套件 (npm install)
+        run: npm install
+      - name: 執行 Vite 打包 (npm run build)
+        run: npm run build
+      - name: 上傳打包好的 dist 資料夾
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+  # 任務二：發布至 GitHub Pages (Deploy)
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
