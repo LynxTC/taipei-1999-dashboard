@@ -64,9 +64,39 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
       <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <h3 class="font-bold text-slate-800 mb-6 flex items-center gap-2">
-          <i data-lucide="bar-chart-3" class="text-orange-500"></i> 行政區分佈統計
+          <i data-lucide="map" class="text-orange-500"></i> 行政區分佈面量圖
         </h3>
-        <div class="h-[300px]"><canvas id="districtChart"></canvas></div>
+        <div class="h-[300px] relative w-full flex justify-center">
+          <svg v-if="taipeiGeoJson" viewBox="0 0 400 300" class="w-full h-full drop-shadow-sm">
+            <g v-for="feature in taipeiGeoJson.features" :key="getDistrictName(feature)">
+              <path :d="feature.pathData" :fill="getDistrictColor(feature)"
+                :stroke="selectedDistrictFilter === getDistrictName(feature) ? '#3b82f6' : '#cbd5e1'"
+                :stroke-width="selectedDistrictFilter === getDistrictName(feature) ? 2 : 1"
+                :opacity="selectedDistrictFilter && selectedDistrictFilter !== getDistrictName(feature) ? 0.3 : 1"
+                class="cursor-pointer transition-all hover:opacity-80 hover:stroke-[#60a5fa] hover:stroke-2"
+                @click="toggleDistrictFilter(getDistrictName(feature))">
+                <!-- SVG 內建的 Title 可以達成原生 Tooltip 效果 -->
+                <title>{{ getDistrictName(feature) }} - 案件數：{{ getDistrictCount(feature) }}</title>
+              </path>
+            </g>
+          </svg>
+
+          <!-- 圖例 (Legend) -->
+          <div v-if="taipeiGeoJson"
+            class="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-slate-200 text-xs pointer-events-none z-10">
+            <div class="font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1 text-[11px] tracking-wider">案件數
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <div v-for="item in mapLegend" :key="item.color" class="flex items-center gap-2">
+                <span class="w-3.5 h-3.5 rounded-sm border border-slate-200 shadow-sm"
+                  :style="{ backgroundColor: item.color }"></span>
+                <span class="text-slate-600 font-medium whitespace-nowrap">{{ item.label }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="flex h-full items-center justify-center text-slate-400 text-sm">正在繪製圖資...</div>
+        </div>
       </div>
 
       <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -261,7 +291,10 @@ const currentPage = ref(1);
 const pageSize = ref(10);
 const errorMessage = ref('');
 
-let charts = { dist: null, cat: null };
+const taipeiGeoJson = ref(null);
+const districtCounts = ref({});
+
+let charts = { cat: null };
 
 // --- 網路連線 ---
 const fetchData = async () => {
@@ -289,6 +322,72 @@ const fetchData = async () => {
   } finally {
     initializing.value = false;
     nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); updateCharts(); });
+  }
+};
+
+// --- D3.js 相關 SVG 輔助函數 ---
+// [關鍵修正] 圖資的屬性可能是 "臺北市大安區" 或英文，但我們統計的 Key 只有 "大安區"
+// 必須進行「強制標準化比對」，確保回傳的名稱 100% 能對應到 districtCounts 的 Key
+const getDistrictName = (feature) => {
+  if (!feature.properties) return '未知區塊';
+  for (const key in feature.properties) {
+    if (!feature.properties[key]) continue;
+    const val = String(feature.properties[key]);
+    const matched = DISTRICTS.find(d => val.includes(d));
+    if (matched) return matched;
+  }
+  return feature.properties.TOWNNAME || feature.properties.name || '未知區塊';
+};
+
+const getDistrictCount = (feature) => districtCounts.value[getDistrictName(feature)] || 0;
+
+// --- 圖例資料 (動態計算範圍) ---
+const mapLegend = computed(() => {
+  const max = Math.max(...Object.values(districtCounts.value), 1);
+  return [
+    { color: '#08519c', label: `> ${Math.round(max * 0.8)}` },
+    { color: '#3182bd', label: `> ${Math.round(max * 0.6)}` },
+    { color: '#6baed6', label: `> ${Math.round(max * 0.4)}` },
+    { color: '#bdd7e7', label: `> ${Math.round(max * 0.2)}` },
+    { color: '#eff3ff', label: '1 以上' },
+    { color: '#f8fafc', label: '0' }
+  ];
+});
+
+const getDistrictColor = (feature) => {
+  const count = getDistrictCount(feature);
+  const maxCount = Math.max(...Object.values(districtCounts.value), 1);
+  if (count > maxCount * 0.8) return '#08519c';
+  if (count > maxCount * 0.6) return '#3182bd';
+  if (count > maxCount * 0.4) return '#6baed6';
+  if (count > maxCount * 0.2) return '#bdd7e7';
+  if (count > 0) return '#eff3ff';
+  return '#f8fafc';
+};
+
+const toggleDistrictFilter = (name) => {
+  selectedDistrictFilter.value = selectedDistrictFilter.value === name ? '' : name;
+};
+
+// --- 載入行政區 GeoJSON ---
+const fetchGeoJson = async () => {
+  try {
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const response = await fetch(`${baseUrl}taipei_districts.json`);
+    if (response.ok) {
+      const data = await response.json();
+      if (typeof d3 !== 'undefined') {
+        // [關鍵修正] 檢查發現圖資坐標為 TWD97 (平面坐標，以公尺為單位)，而非 WGS84 經緯度
+        // 因此不能使用球面投影 geoMercator，應改為 geoIdentity 並翻轉 Y 軸對齊 SVG
+        const projection = d3.geoIdentity().reflectY(true).fitSize([400, 300], data);
+        const pathGen = d3.geoPath().projection(projection);
+        // [關鍵修正] 預先計算好 SVG <path> 的 d 屬性字串，避免 Vue proxy 導致 D3 失效
+        data.features.forEach(feature => { feature.pathData = pathGen(feature); });
+      }
+      taipeiGeoJson.value = data; // 計算完成後再丟入 Vue 響應式系統中
+    }
+  } catch (e) {
+    console.error("無法載入行政區圖資:", e);
   }
 };
 
@@ -372,18 +471,23 @@ const dataTimeRange = computed(() => {
   return `${dates[0].substring(0, 4)}/${dates[0].substring(4, 6)} ~ ${dates[dates.length - 1].substring(0, 4)}/${dates[dates.length - 1].substring(4, 6)}`;
 });
 
-const filteredData = computed(() => {
+// --- 獨立過濾邏輯 (支援忽略特定條件) ---
+const getFilteredData = (ignoreDistrict = false, ignoreCategory = false) => {
   let data = [...allData.value];
   const kw = searchKeyword.value.trim().toLowerCase();
-  // [防護] 確保字串相加前不會有 null，導致 .toLowerCase() 崩潰
   if (kw) data = data.filter(i => ((i['案件地址'] || '') + (i['派工項目'] || '') + (i['案件編號'] || '')).toLowerCase().includes(kw));
-  if (selectedDistrictFilter.value) data = data.filter(i => (i['案件地址'] || '').includes(selectedDistrictFilter.value));
-  if (selectedCategoryFilter.value) data = data.filter(i => categorizeItem(i['派工項目']) === selectedCategoryFilter.value);
+  if (!ignoreDistrict && selectedDistrictFilter.value) data = data.filter(i => (i['案件地址'] || '').includes(selectedDistrictFilter.value));
+  if (!ignoreCategory && selectedCategoryFilter.value) data = data.filter(i => categorizeItem(i['派工項目']) === selectedCategoryFilter.value);
   if (startDate.value || endDate.value) {
     const s = startDate.value ? startDate.value.replace(/-/g, '') : '00000000';
     const e = endDate.value ? endDate.value.replace(/-/g, '') : '99999999';
     data = data.filter(i => String(i['立案日期']) >= s && String(i['立案日期']) <= e);
   }
+  return data;
+};
+
+const filteredData = computed(() => {
+  let data = getFilteredData(false, false); // 列表套用所有過濾條件
   data.sort((a, b) => {
     const tA = (a['立案日期'] || '') + (a['立案時間'] || '');
     const tB = (b['立案日期'] || '') + (b['立案時間'] || '');
@@ -415,7 +519,12 @@ const categorizeItem = (item) => {
 const getDistrict = (addr) => {
   // [防護] 防止地址為 null 時執行 .match 導致 Vue 渲染完全中斷
   if (!addr || typeof addr !== 'string') return '其他';
-  return (addr.match(/(.{2,3}區)/) || ['', '其他'])[1];
+
+  // [修正] 改用包含搜尋，避免地址開頭是 "臺北市" 或郵遞區號導致 substring(0, 3) 誤判
+  const matchedDistrict = DISTRICTS.find(d => addr.includes(d));
+  if (matchedDistrict) return matchedDistrict;
+
+  return '其他';
 };
 
 const getTopDistrict = () => {
@@ -435,17 +544,31 @@ const formatDate = (d) => String(d).replace(/(\d{4})(\d{2})(\d{2})/, '$1/$2/$3')
 
 const updateCharts = () => {
   if (typeof Chart === 'undefined') return;
-  const dC = {}; const cC = {}; Object.keys(CATEGORY_MAP).forEach(k => cC[k] = 0); cC["其他"] = 0;
-  filteredData.value.forEach(i => { const d = getDistrict(i['案件地址']); dC[d] = (dC[d] || 0) + 1; const c = categorizeItem(i['派工項目']); cC[c] = (cC[c] || 0) + 1; });
 
-  if (document.getElementById('districtChart')) {
-    if (charts.dist) charts.dist.destroy();
-    charts.dist = new Chart(document.getElementById('districtChart'), { type: 'bar', data: { labels: DISTRICTS, datasets: [{ label: '案件量', data: DISTRICTS.map(d => dC[d] || 0), backgroundColor: '#3b82f6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, onClick: (e, el) => { if (el.length > 0) selectedDistrictFilter.value = DISTRICTS[el[0].index]; } } });
-  }
+  // 地圖資料 (忽略行政區過濾，保留其他區的數量不歸零)
+  const mapData = getFilteredData(true, false);
+  const dC = {};
+  mapData.forEach(i => { const d = getDistrict(i['案件地址']); dC[d] = (dC[d] || 0) + 1; });
+  districtCounts.value = dC; // 賦值給響應式變數以觸發 SVG 顏色更新
+
+  // 圓餅圖資料 (忽略類別過濾，保持整體比例結構)
+  const catData = getFilteredData(false, true);
+  const cC = {}; Object.keys(CATEGORY_MAP).forEach(k => cC[k] = 0); cC["其他"] = 0;
+  catData.forEach(i => { const c = categorizeItem(i['派工項目']); cC[c] = (cC[c] || 0) + 1; });
+
   if (document.getElementById('coreCategoryChart')) {
     if (charts.cat) charts.cat.destroy();
     const l = Object.keys(cC);
-    charts.cat = new Chart(document.getElementById('coreCategoryChart'), { type: 'doughnut', data: { labels: l, datasets: [{ data: l.map(x => cC[x]), backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#94a3b8'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', onClick: (e, el) => { if (el.length > 0) selectedCategoryFilter.value = l[el[0].index]; } } });
+
+    // 動態計算圓餅圖顏色 (套用淡化效果)
+    const baseColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#94a3b8'];
+    const bgColors = l.map((cat, i) => {
+      const color = baseColors[i % baseColors.length];
+      // 如果有篩選條件，且不等於目前圖塊類別，加上 4D (約 30% 透明度) 達成淡化效果
+      return (selectedCategoryFilter.value && selectedCategoryFilter.value !== cat) ? color + '4D' : color;
+    });
+
+    charts.cat = new Chart(document.getElementById('coreCategoryChart'), { type: 'doughnut', data: { labels: l, datasets: [{ data: l.map(x => cC[x]), backgroundColor: bgColors, borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', onClick: (e, el) => { if (el.length > 0) { const clickedCat = l[el[0].index]; selectedCategoryFilter.value = selectedCategoryFilter.value === clickedCat ? '' : clickedCat; } } } });
   }
 };
 
@@ -453,7 +576,9 @@ const resetFilters = () => { searchKeyword.value = ''; selectedDistrictFilter.va
 
 watch([filteredData, pageSize, currentSort, selectedDistrictFilter, selectedCategoryFilter, startDate, endDate], () => { currentPage.value = 1; nextTick(() => updateCharts()); });
 
-onMounted(() => fetchData());
+onMounted(() => {
+  fetchGeoJson().then(() => fetchData());
+});
 </script>
 
 <style scoped>
