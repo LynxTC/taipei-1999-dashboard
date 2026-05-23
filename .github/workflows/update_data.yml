@@ -39,3 +39,19 @@ jobs:
           else
             echo "資料無變更，無需提交。"
           fi
+
+      - name: 設定 Node.js 環境 (Setup Node.js)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: 安裝前端套件與打包 (Install & Build)
+        run: |
+          npm install
+          npm run build
+
+      - name: 部署至 GitHub Pages (Deploy to GitHub Pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
