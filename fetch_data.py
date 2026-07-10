@@ -8,7 +8,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 從 App.vue 取得的 API URL
-API_URL = 'https://data.taipei/api/v1/dataset/131e3e00-790d-472d-bd2c-326c62268d4e?scope=resourceAquire'
+API_URL = 'https://data.taipei/api/v1/dataset/5b68c8f3-59f8-402d-adb3-1105b0b248f4?scope=resourceAquire'
 # CKAN API 通常的單次請求上限是 1000
 LIMIT = 1000
 # 輸出路徑，對應 Vue 的 public 資料夾
